@@ -1,0 +1,6 @@
+#Archivos especificos
+ngrok.exe
+.env
+
+#Entorno virtual
+/venv

@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agente_eclesiastico": "./src/agent/graph.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.11",
+  "pip_config_file": "requirements.txt"
+}
