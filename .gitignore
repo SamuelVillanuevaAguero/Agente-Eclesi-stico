@@ -4,3 +4,6 @@ ngrok.exe
 
 #Entorno virtual
 /venv
+
+#Scripts
+init_users.py

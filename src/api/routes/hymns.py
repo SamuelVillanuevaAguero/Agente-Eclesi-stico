@@ -7,10 +7,12 @@ Endpoints:
   GET  /api/v1/hymns/{number}        — Himno por número
   GET  /api/v1/hymns/occasion/{occ}  — Himnos por ocasión litúrgica
   GET  /api/v1/hymns/tone/{tone}     — Himnos por tono musical
+
+Todos los endpoints requieren el header: X-API-Key: <tu_api_key>
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
 from src.retrieval.retriever import get_retriever
 from src.api.schemas import (
@@ -19,6 +21,7 @@ from src.api.schemas import (
     HymnsListResponse,
     HymnsSearchResponse,
 )
+from src.auth.dependencies import require_api_key
 
 router = APIRouter(prefix="/hymns", tags=["Himnario"])
 
@@ -54,12 +57,12 @@ def _to_full(h: dict) -> HymnFull:
 async def list_hymns(
     page: int = Query(1, ge=1, description="Número de página"),
     per_page: int = Query(20, ge=5, le=100, description="Himnos por página"),
+    _user: dict = Depends(require_api_key),
 ) -> HymnsListResponse:
     retriever = get_retriever()
-    total = retriever.count()
+    total  = retriever.count()
     offset = (page - 1) * per_page
-    hymns = retriever.list_all(limit=per_page, offset=offset)
-
+    hymns  = retriever.list_all(limit=per_page, offset=offset)
     return HymnsListResponse(
         total=total,
         page=page,
@@ -77,6 +80,7 @@ async def list_hymns(
 async def search_hymns(
     q: str = Query(..., min_length=2, description="Consulta de búsqueda"),
     k: int = Query(5, ge=1, le=20, description="Número de resultados"),
+    _user: dict = Depends(require_api_key),
 ) -> HymnsSearchResponse:
     retriever = get_retriever()
     hymns = retriever.search(query=q, k=k)
@@ -90,16 +94,11 @@ async def search_hymns(
     "/occasion/{ocasion}",
     response_model=list[HymnBrief],
     summary="Himnos por ocasión litúrgica",
-    description=(
-        "Devuelve himnos apropiados para una ocasión. "
-        "Ocasiones: cosechas, primicias, pentecostes, ascension, "
-        "semana_santa, resurreccion, navidad, bautismo, santa_cena, "
-        "trabajo_siembra, mision."
-    ),
 )
 async def hymns_by_occasion(
     ocasion: str,
     limit: int = Query(10, ge=1, le=50),
+    _user: dict = Depends(require_api_key),
 ) -> list[HymnBrief]:
     retriever = get_retriever()
     hymns = retriever.get_by_occasion(ocasion=ocasion, k=limit)
@@ -110,12 +109,11 @@ async def hymns_by_occasion(
     "/tone/{tono}",
     response_model=list[HymnBrief],
     summary="Himnos por tono musical",
-    description=(
-        "Filtra himnos por tono. Ejemplos: 'C Mayor', 'E Mayor', 'La Mayor'. "
-        "Nota: la mayoría figuran como INDEFINIDO en el himnario original."
-    ),
 )
-async def hymns_by_tone(tono: str) -> list[HymnBrief]:
+async def hymns_by_tone(
+    tono: str,
+    _user: dict = Depends(require_api_key),
+) -> list[HymnBrief]:
     retriever = get_retriever()
     hymns = retriever.get_by_tone(tono=tono)
     if not hymns:
@@ -132,7 +130,10 @@ async def hymns_by_tone(tono: str) -> list[HymnBrief]:
     summary="Obtener himno por número",
     description="Devuelve el himno completo con su letra.",
 )
-async def get_hymn(numero: int) -> HymnFull:
+async def get_hymn(
+    numero: int,
+    _user: dict = Depends(require_api_key),
+) -> HymnFull:
     if not 1 <= numero <= 535:
         raise HTTPException(
             status_code=400,
@@ -143,6 +144,6 @@ async def get_hymn(numero: int) -> HymnFull:
     if not hymn:
         raise HTTPException(
             status_code=404,
-            detail=f"Himno #{numero} no encontrado. Asegúrese de haber ejecutado la indexación.",
+            detail=f"Himno #{numero} no encontrado.",
         )
     return _to_full(hymn)

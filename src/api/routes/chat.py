@@ -6,6 +6,8 @@ Endpoints:
   POST /api/v1/chat/{thread_id}/resume  — Reanuda conversación interrumpida
   GET  /api/v1/chat/{thread_id}/history — Historial de la conversación
   DELETE /api/v1/chat/{thread_id}       — Info para limpiar conversación
+
+Todos los endpoints requieren el header: X-API-Key: <tu_api_key>
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import json
 import uuid
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -25,40 +27,20 @@ from src.api.schemas import (
     ResumeRequest,
     SSEEventType,
 )
+from src.auth.dependencies import require_api_key
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 # ─── Grafo con memoria para FastAPI standalone ────────────────────────────────
-# LangGraph Studio compilará el grafo con su propio checkpointer automático.
-# Aquí lo compilamos con MemorySaver para que FastAPI tenga memoria por hilo.
 _memory = MemorySaver()
-_graph  = build_graph()
-_graph_mem = _graph.__class__  # placeholder
-
-try:
-    from langgraph.graph.state import CompiledStateGraph
-    # Re-compilar con checkpointer para FastAPI
-    _graph_mem = build_graph()
-    # Acceder al builder interno para recompilar
-    _graph_mem = _graph_mem.nodes  # test access
-except Exception:
-    pass
-
-# Forma más simple y robusta: usar el grafo con checkpointer pasado en config
-def _get_graph():
-    """Devuelve el grafo. Re-construye con memoria si es necesario."""
-    return build_graph()
-
-# Instancia única con memoria
 _compiled = None
+
 
 def get_graph_with_memory():
     global _compiled
     if _compiled is None:
         g = build_graph()
-        # Intentar recompilar con checkpointer
         try:
-            from langgraph.graph.state import StateGraph
             _compiled = g.with_config({"checkpointer": _memory})
         except Exception:
             _compiled = g
@@ -157,8 +139,20 @@ async def _stream_agent(
 
 # ─── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/stream", summary="Chat con streaming SSE", response_class=StreamingResponse)
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
+@router.post(
+    "/stream",
+    summary="Chat con streaming SSE",
+    response_class=StreamingResponse,
+    description=(
+        "Inicia o continúa una conversación con el agente vía SSE. "
+        "Requiere header `X-API-Key`. El `thread_id` identifica la sesión del "
+        "usuario final (genera uno por dispositivo/usuario en tu app Flutter)."
+    ),
+)
+async def chat_stream(
+    request: ChatRequest,
+    _user: dict = Depends(require_api_key),   # ← protege el endpoint
+) -> StreamingResponse:
     thread_id = request.thread_id or str(uuid.uuid4())
     return StreamingResponse(
         _stream_agent(user_message=request.message, thread_id=thread_id),
@@ -167,8 +161,16 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
 
-@router.post("/{thread_id}/resume", summary="Reanudar conversación (HIL)", response_class=StreamingResponse)
-async def resume_conversation(thread_id: str, request: ResumeRequest) -> StreamingResponse:
+@router.post(
+    "/{thread_id}/resume",
+    summary="Reanudar conversación (HIL)",
+    response_class=StreamingResponse,
+)
+async def resume_conversation(
+    thread_id: str,
+    request: ResumeRequest,
+    _user: dict = Depends(require_api_key),   # ← protege el endpoint
+) -> StreamingResponse:
     return StreamingResponse(
         _stream_agent(user_message="", thread_id=thread_id, resume_value=request.response),
         media_type="text/event-stream",
@@ -176,8 +178,14 @@ async def resume_conversation(thread_id: str, request: ResumeRequest) -> Streami
     )
 
 
-@router.get("/{thread_id}/history", summary="Historial de conversación")
-async def get_history(thread_id: str) -> dict:
+@router.get(
+    "/{thread_id}/history",
+    summary="Historial de conversación",
+)
+async def get_history(
+    thread_id: str,
+    _user: dict = Depends(require_api_key),   # ← protege el endpoint
+) -> dict:
     config = _config(thread_id)
     try:
         graph = build_graph()
@@ -202,8 +210,14 @@ async def get_history(thread_id: str) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.delete("/{thread_id}", summary="Limpiar conversación")
-async def clear_conversation(thread_id: str) -> dict:
+@router.delete(
+    "/{thread_id}",
+    summary="Limpiar conversación",
+)
+async def clear_conversation(
+    thread_id: str,
+    _user: dict = Depends(require_api_key),   # ← protege el endpoint
+) -> dict:
     return {
         "thread_id": thread_id,
         "message": "Para nueva conversación usa un thread_id diferente.",

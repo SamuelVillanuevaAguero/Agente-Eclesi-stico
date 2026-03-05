@@ -2,25 +2,28 @@
 Aplicación FastAPI principal del Agente Eclesiástico.
 
 Rutas base:
-  /api/v1/chat/*   — Conversación con el agente (SSE streaming)
-  /api/v1/hymns/*  — Catálogo del himnario
-  /api/v1/admin/*  — Administración (indexación)
-  /health          — Health check
-  /docs            — Swagger UI (deshabilitado en producción)
-  /redoc           — ReDoc
+  /api/v1/auth/*   — Autenticación y gestión de API Keys
+  /api/v1/chat/*   — Conversación con el agente (SSE streaming)  [requiere X-API-Key]
+  /api/v1/hymns/*  — Catálogo del himnario                       [requiere X-API-Key]
+  /api/v1/admin/*  — Administración (indexación)                 [requiere X-API-Key]
+  /health          — Health check (público)
+  /docs            — Swagger UI (con autenticación integrada)
 """
 from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import settings
+from src.auth.database import init_db
+from src.auth.dependencies import require_api_key
 from src.ingestion.indexer import collection_exists, index_hymns
 from src.retrieval.retriever import get_retriever
+from src.api.routes.auth import router as auth_router
 from src.api.routes.chat import router as chat_router
 from src.api.routes.hymns import router as hymns_router
 from src.api.schemas import HealthResponse, IngestResponse
@@ -30,10 +33,11 @@ from src.api.schemas import HealthResponse, IngestResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Al iniciar: verifica que ChromaDB esté indexado.
-    Si no hay datos, recomienda ejecutar 'make ingest'.
-    """
+    # 1. Inicializar base de datos de autenticación
+    init_db()
+    print("✅ Base de datos de autenticación lista (SQLite).")
+
+    # 2. Verificar ChromaDB
     if not collection_exists():
         print(
             "\n⚠️  ADVERTENCIA: El himnario no está indexado.\n"
@@ -41,9 +45,8 @@ async def lifespan(app: FastAPI):
         )
     else:
         count = get_retriever().count()
-        print(f"\n✅ ChromaDB listo — {count} himnos indexados.\n")
+        print(f"✅ ChromaDB listo — {count} himnos indexados.\n")
     yield
-    # Cleanup al apagar (si fuera necesario)
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -54,7 +57,11 @@ app = FastAPI(
     description=(
         "API del Agente Eclesiástico de la **Iglesia Cristiana Universal "
         "Apostólica de Jesús Pentecostés A.R.** — Asistente inteligente del himnario "
-        "con streaming SSE, memoria conversacional y Human-in-the-Loop."
+        "con streaming SSE, memoria conversacional y Human-in-the-Loop.\n\n"
+        "## Autenticación\n"
+        "1. Llama a `POST /api/v1/auth/token` con tu email y contraseña.\n"
+        "2. Usa la `api_key` recibida en el header `X-API-Key` en todas las peticiones.\n"
+        "3. En Swagger: haz clic en **Authorize 🔒** e ingresa tu API Key."
     ),
     lifespan=lifespan,
     docs_url="/docs",
@@ -73,21 +80,19 @@ app.add_middleware(
 # ─── Routers ──────────────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
 
-app.include_router(chat_router,  prefix=API_PREFIX)
-app.include_router(hymns_router, prefix=API_PREFIX)
+app.include_router(auth_router,  prefix=API_PREFIX)  # ← Público (login)
+app.include_router(chat_router,  prefix=API_PREFIX)  # ← Protegido internamente
+app.include_router(hymns_router, prefix=API_PREFIX)  # ← Protegido internamente
 
 
-# ─── Endpoints de administración ──────────────────────────────────────────────
+# ─── Admin (protegido con API Key) ────────────────────────────────────────────
 
 @app.post(
     f"{API_PREFIX}/admin/ingest",
     response_model=IngestResponse,
     tags=["Admin"],
     summary="Indexar himnario",
-    description=(
-        "Parsea los archivos .txt del directorio de himnos y los indexa en ChromaDB. "
-        "Usar `force=true` para re-indexar aunque ya existan datos."
-    ),
+    dependencies=[Depends(require_api_key)],   # ← Protegido
 )
 async def trigger_ingest(force: bool = False) -> IngestResponse:
     try:
@@ -105,7 +110,7 @@ async def trigger_ingest(force: bool = False) -> IngestResponse:
         )
 
 
-# ─── Health Check ─────────────────────────────────────────────────────────────
+# ─── Health Check (público) ───────────────────────────────────────────────────
 
 @app.get(
     "/health",
@@ -129,7 +134,7 @@ async def health_check() -> HealthResponse:
     )
 
 
-# ─── Root ─────────────────────────────────────────────────────────────────────
+# ─── Root (público) ───────────────────────────────────────────────────────────
 
 @app.get("/", tags=["Sistema"], include_in_schema=False)
 async def root() -> dict:
@@ -138,5 +143,6 @@ async def root() -> dict:
         "version": settings.api_version,
         "documentacion": "/docs",
         "salud": "/health",
+        "autenticacion": f"{API_PREFIX}/auth/token",
         "chat_stream": f"{API_PREFIX}/chat/stream",
     }
