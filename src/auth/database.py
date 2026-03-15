@@ -11,9 +11,11 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+_IS_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+DB_PATH = Path("/data/auth.db") if _IS_RAILWAY else Path("data/auth.db")
+
 # ─── Ruta de la BD ────────────────────────────────────────────────────────────
 DB_PATH = Path("data/auth.db")
-
 
 # ─── Conexión ─────────────────────────────────────────────────────────────────
 

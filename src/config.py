@@ -6,6 +6,12 @@ import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Detectar si estamos en Railway
+_IS_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+_DATA_BASE = Path("/data") if _IS_RAILWAY else Path("data")
+
+# Luego cambia las rutas:
+chroma_persist_dir: Path = _DATA_BASE / "chroma_db"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
