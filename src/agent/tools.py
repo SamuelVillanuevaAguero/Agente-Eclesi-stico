@@ -108,7 +108,7 @@ def buscar_por_ocasion(ocasion: str, limite: int = 8) -> str:
     Busca himnos apropiados para una ocasión litúrgica o festiva específica.
 
     Úsala cuando el usuario pregunte qué himnos cantar en:
-    - cosexchas, primicias
+    - cosechas, primicias
     - pentecostés, ascensión
     - semana santa, viernes santo, calvario
     - resurrección, pascua

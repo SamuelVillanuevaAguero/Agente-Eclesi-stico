@@ -2,17 +2,13 @@
 Grafo LangGraph del Agente Eclesiástico.
 
 Arquitectura:
-    START → agent_node → should_continue → tools → agent_node (loop)
+    START → agent_node → should_continue → tools   → agent_node (loop)
+                              │
+                              ├──────────── agent   ← corrección anti-alucinación
                               │
                          clarification  ← interrupt() → espera usuario
                               │
                           __end__
-
-Nota sobre el checkpointer:
-  - LangGraph Studio / API inyecta su propio checkpointer automáticamente.
-  - Para FastAPI standalone, el checkpointer se pasa en el momento de
-    invocar el grafo (ver src/api/routes/chat.py).
-  - Por eso NO se define checkpointer aquí en build_graph().
 """
 from __future__ import annotations
 
@@ -40,9 +36,10 @@ def build_graph():
         "agent",
         should_continue,
         {
-            "tools":        "tools",
-            "clarification":"clarification",
-            "__end__":      END,
+            "tools":          "tools",
+            "clarification":  "clarification",
+            "agent":          "agent",   # ← corrección anti-alucinación
+            "__end__":        END,
         },
     )
 
@@ -56,5 +53,4 @@ def build_graph():
 
 
 # ── Instancia exportada para LangGraph Studio ─────────────────────────────────
-# LangGraph Studio lee esta variable directamente desde langgraph.json
 graph = build_graph()
